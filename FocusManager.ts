@@ -3,6 +3,7 @@ import { FocusState, FocusStateConfig } from "./FocusState";
 import { FMLog } from "./utils/FocusLogger";
 import { FocusEventBus } from "./utils/FocusEventBus";
 import { FocusArt } from "./utils/FocusArt";
+import { Device } from './utils/Device';
 import * as RE from 'rogue-engine';
 
 export interface FocusTransitionEffect {
@@ -87,6 +88,9 @@ export class FocusManager {
     public get events(): FocusEventBus {
         return this._events;
     }
+
+    /** Provides information about the current device (e.g., touch capabilities). */
+    public readonly device = Device;
 
     /**
      * Checks if the currently active state matches the given name.

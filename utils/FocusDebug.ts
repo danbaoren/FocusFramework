@@ -83,8 +83,13 @@ export class FocusDebugger {
 
         parts.push(this.createInfoSection('Transition', config.transitionEffectName ? [config.transitionEffectName] : undefined));
         parts.push(this.createInfoSection('Prefabs', config.managedPrefabs));
+
+        const visibleLayers = config.ui?.visible || [];
+        const preservedLayers = new Set(config.ui?.preserveOnExit || []);
+        const resetLayers = visibleLayers.filter(layer => !preservedLayers.has(layer));
         parts.push(this.createInfoSection('UI: Visible', config.ui?.visible));
-        parts.push(this.createInfoSection('UI: Reset on Exit', config.ui?.resetOnExit));
+        parts.push(this.createInfoSection('UI: Reset on Exit (Default)', resetLayers));
+        parts.push(this.createInfoSection('UI: Preserve on Exit', config.ui?.preserveOnExit));
         parts.push(this.createInfoSection('UI: Cleanup on Exit', config.ui?.cleanupOnExit));
 
         const hooks: string[] = [];

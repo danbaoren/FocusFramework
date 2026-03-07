@@ -1,5 +1,6 @@
 import * as RE from 'rogue-engine';
 import { FMLog } from './utils/FocusLogger';
+import { Device } from './utils/Device';
 
 interface DelegatedListener {
     eventType: string;
@@ -234,12 +235,21 @@ export class UILayer {
      * @param callback The function to call when the event occurs on a matching element. The matching element is passed as the second argument.
      */
     on(eventType: string, selector: string, callback: (event: Event, target: HTMLElement) => void): this {
+        // The master handler for the original event type (e.g., 'click', 'mouseover').
+        // This is always active for mouse-based interactions.
         if (!this.masterHandlers.has(eventType)) {
             const handler = (event: Event) => {
+                // On mobile, a 'click' event might be a "ghost click" arriving 300ms after a tap.
+                // If the event's `defaultPrevented` flag is true, it means our `touchend` handler
+                // already processed this tap, so we should ignore the ghost.
+                if (event.defaultPrevented) {
+                    return;
+                }
+
                 const targetElement = event.target as HTMLElement;
                 if (!targetElement) return;
 
-                // Check all delegations for this event type
+                // Find a matching delegation for this event.
                 for (const delegation of this.delegatedListeners) {
                     if (delegation.eventType === event.type) {
                         const matchingTarget = targetElement.closest(delegation.selector);
@@ -253,6 +263,66 @@ export class UILayer {
             this.masterHandlers.set(eventType, handler);
         }
 
+        // --- Mobile Tap Emulation for 'click' events ---
+        // If a 'click' listener is being added, we also set up touch handlers
+        // to create a reliable "tap" event on mobile, bypassing browser inconsistencies.
+        if (eventType === 'click') {
+            const tapHandlerName = 'v-tap-handler';
+            if (!this.masterHandlers.has(tapHandlerName)) {
+                let touchStart: { x: number, y: number, target: HTMLElement } | null = null;
+
+                const onTouchStart = (e: TouchEvent) => {
+                    if (e.touches.length === 1) {
+                        const target = e.target as HTMLElement;
+                        touchStart = {
+                            x: e.touches[0].clientX,
+                            y: e.touches[0].clientY,
+                            target: target
+                        };
+                    }
+                };
+
+                const onTouchEnd = (e: TouchEvent) => {
+                    if (touchStart && e.changedTouches.length === 1) {
+                        const endX = e.changedTouches[0].clientX;
+                        const endY = e.changedTouches[0].clientY;
+                        const dist = Math.sqrt(Math.pow(endX - touchStart.x, 2) + Math.pow(endY - touchStart.y, 2));
+
+                        // If the finger moved less than 15px, we consider it a tap.
+                        if (dist < 15) {
+                            // The tap happened. Now, check if the target matches any 'click' selector.
+                            for (const delegation of this.delegatedListeners) {
+                                if (delegation.eventType === 'click') {
+                                    const matchingTarget = touchStart.target.closest(delegation.selector);
+                                    if (matchingTarget && this.element.contains(matchingTarget)) {
+                                        // This was a valid tap on a clickable element.
+                                        // Prevent the browser from firing a "ghost click" later.
+                                        e.preventDefault();
+                                        // Execute the callback.
+                                        delegation.callback(e, matchingTarget as HTMLElement);
+                                        // We break because a single tap should only trigger one action.
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    touchStart = null;
+                };
+                
+                this.element.addEventListener('touchstart', onTouchStart as EventListener, { passive: true });
+                this.element.addEventListener('touchend', onTouchEnd as EventListener, { passive: false });
+
+                this.addCleanupTask(() => {
+                    this.element.removeEventListener('touchstart', onTouchStart as EventListener);
+                    this.element.removeEventListener('touchend', onTouchEnd as EventListener);
+                });
+
+                this.masterHandlers.set(tapHandlerName, () => {});
+            }
+        }
+
+        // Add the listener to our internal list.
         this.delegatedListeners.push({ eventType, selector, callback });
         return this;
     }
@@ -277,7 +347,6 @@ export class UILayer {
                 this.masterHandlers.delete(eventType);
             }
         }
-
         return this;
     }
 }
@@ -299,6 +368,13 @@ export class UILayerManager {
             this.uiRoot = RE.Runtime.uiContainer;
             if (!this.uiRoot) {
                 FMLog.log('error', "UILayerManager: RE.Runtime.uiContainer not found. UI layers will not be attached.");
+            } else {
+                // Add device-specific class for easy CSS targeting by developers.
+                if (Device.isTouchDevice) {
+                    this.uiRoot.classList.add('fm-touch-device');
+                } else {
+                    this.uiRoot.classList.add('fm-mouse-device');
+                }
             }
         });
     }
